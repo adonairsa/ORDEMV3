@@ -11,7 +11,7 @@ st.set_page_config(
     page_title="PAINEL DO LEILOEIRO PRO",
     page_icon="🐂",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # ==================== CSS ====================
@@ -20,7 +20,7 @@ css_code = """
     #MainMenu {visibility: hidden; display: none;}
     footer {visibility: hidden; display: none;}
     [data-testid="stToolbar"] {display: none;}
-    .block-container {padding-top: 1rem;}
+    .block-container {padding-top: 3rem; padding-bottom: 2rem;}
 
     .lote-destaque {
         background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
@@ -76,11 +76,7 @@ css_code = """
         border-radius: 15px;
         margin-bottom: 15px;
         border-left: 8px solid #818CF8;
-    }
-    .ai-consideracoes-box, .ai-consideracoes-box * {
-        color: #FFFFFF !important;
-        font-size: 16px !important;
-        line-height: 1.6 !important;
+        color: white !important;
     }
     .catalogo-header {
         background: #F59E0B;
@@ -132,7 +128,7 @@ css_code = """
 """
 st.markdown(css_code, unsafe_allow_html=True)
 
-# ==================== API KEYS (APENAS DEEPSEEK) ====================
+# ==================== API KEYS (DEEPSEEK) ====================
 def obter_api_keys():
     ds_keys = []
     try:
@@ -158,7 +154,7 @@ def normalizar_lote(valor):
 def hash_bytes(b):
     return hashlib.md5(b).hexdigest() if b else ""
 
-# ==================== PROCESSAMENTO DA O.E. (PDF TABELA) ====================
+# ==================== PROCESSAMENTO DA O.E. (TABELA O.E. X LT) ====================
 @st.cache_data(ttl=7200, show_spinner=False)
 def extrair_ordem_entrada_tabela(file_bytes):
     sequencia = []
@@ -215,14 +211,18 @@ def extrair_ordem_entrada_tabela(file_bytes):
 # ==================== RENDERIZAR IMAGEM DO CATÁLOGO ====================
 @st.cache_data(ttl=7200, show_spinner=False)
 def contar_paginas_pdf(file_bytes):
-    if not file_bytes: return 0
+    if not file_bytes:
+        return 0
     try:
-        with pdfplumber.open(BytesIO(file_bytes)) as pdf: return len(pdf.pages)
-    except Exception: return 0
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+            return len(pdf.pages)
+    except Exception:
+        return 0
 
 @st.cache_data(ttl=7200, show_spinner=False)
 def obter_imagem_bytes_pagina(file_bytes, num_pagina, resolucao=150):
-    if not file_bytes or num_pagina < 0: return None
+    if not file_bytes or num_pagina < 0:
+        return None
     try:
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             if 0 <= num_pagina < len(pdf.pages):
@@ -234,7 +234,7 @@ def obter_imagem_bytes_pagina(file_bytes, num_pagina, resolucao=150):
         return None
     return None
 
-# ==================== DEEPSEEK INDEXA O CATÁLOGO (TEXTO DO PDF) ====================
+# ==================== DEEPSEEK INDEXA O CATÁLOGO ====================
 def deepseek_indexar_pagina_catalogo(texto_pagina, ds_keys):
     if not texto_pagina or not ds_keys:
         return None
@@ -313,7 +313,8 @@ def construir_indice_catalogo(file_bytes_cat, hash_arquivo, ds_keys, max_paginas
 
 def encontrar_no_indice(num_lote_oe, nome_animal_oe, indice):
     chave = normalizar_lote(num_lote_oe)
-    if chave in indice: return indice[chave], -1
+    if chave in indice:
+        return indice[chave], -1
 
     if nome_animal_oe:
         melhor_match = None
@@ -337,7 +338,8 @@ def deepseek_cruzar_cached(num_lote, dados_ordem_str, dados_catalogo_str, ds_key
     dados_ordem = json.loads(dados_ordem_str)
     dados_catalogo = json.loads(dados_catalogo_str)
 
-    if not ds_keys: return None
+    if not ds_keys:
+        return None
 
     prompt = f"""
     Você é um locutor de leilão experiente. Cruze as informações do LOTE {num_lote} (Entrada O.E.: {dados_ordem.get('oe', '')}) e gere o roteiro.
@@ -389,12 +391,14 @@ def deepseek_cruzar(num_lote, dados_ordem, dados_catalogo, ds_keys):
     )
 
 def renderizar_pedigree(dados_catalogo):
-    if not dados_catalogo: return
+    if not dados_catalogo:
+        return
     p, m = dados_catalogo.get("pai", ""), dados_catalogo.get("mae", "")
     ap, apm = dados_catalogo.get("avo_paterno", ""), dados_catalogo.get("avo_paterna", "")
     am, amm = dados_catalogo.get("avo_materno", ""), dados_catalogo.get("avo_materna", "")
 
-    if not any([p, m, ap, apm, am, amm]): return
+    if not any([p, m, ap, apm, am, amm]):
+        return
 
     html = '<div class="pedigree-card"><table>'
     html += f'<tr><td><strong>PAI</strong></td><td>{p or "-"}</td><td><strong>AVÔ PATERNO</strong></td><td>{ap or "-"}</td></tr>'
@@ -425,7 +429,7 @@ def run():
     sequencia_oe, mapa_oe = extrair_ordem_entrada_tabela(file_bytes_oe)
 
     if not sequencia_oe:
-        st.warning("Carregue o PDF da Ordem de Entrada no menu lateral!")
+        st.warning("👈 Abra a barra lateral e carregue o PDF da Ordem de Entrada para começar!")
         st.stop()
 
     indice_catalogo = {}
