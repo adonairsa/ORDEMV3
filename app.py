@@ -1,209 +1,314 @@
 import streamlit as st
 import pdfplumber
+import re
 import requests
 import json
-import re
+import base64
+import difflib
+import hashlib
 from io import BytesIO
 
-# Importa a biblioteca para buscar na internet
-try:
-    from duckduckgo_search import DDGS
-except ImportError:
-    st.error("⚠️ Falta instalar o pacote de busca. Adicione 'duckduckgo-search' no seu requirements.txt")
-
-# Configuração da Página
-st.set_page_config(page_title="Painel Web Search", page_icon="🌐", layout="wide")
+st.set_page_config(
+    page_title="PAINEL DO LEILOEIRO PRO",
+    page_icon="🐂",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 # ==================== CSS ====================
-st.markdown("""
+css_code = """
 <style>
-    .abertura { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white; padding: 25px; border-radius: 15px; font-size: 26px; font-weight: bold; text-align: center; font-style: italic; margin-bottom: 20px;}
-    .linha-oe { background: #1E293B; color: #34D399; padding: 15px; border-radius: 10px; font-family: monospace; font-size: 16px; border-left: 5px solid #34D399; margin-bottom: 20px;}
-    .parecer { background: #0F172A; color: white; padding: 20px; border-radius: 10px; border: 1px solid #334155; font-size: 16px; line-height: 1.6;}
-    .net-box { background: #451A03; color: #FDBA74; padding: 15px; border-radius: 10px; border-left: 5px solid #F97316; margin-bottom: 20px;}
-    .gatilho { background: linear-gradient(90deg, #EC4899 0%, #8B5CF6 100%); color: white; padding: 12px; border-radius: 10px; font-weight: bold; font-size: 18px; margin-bottom: 10px;}
-</style>
-""", unsafe_allow_html=True)
+    #MainMenu {visibility: hidden; display: none;}
+    footer {visibility: hidden; display: none;}
+    [data-testid="stToolbar"] {display: none;}
+    .block-container {padding-top: 1rem;}
 
-# ==================== FUNÇÕES ====================
-def obter_chave_deepseek():
-    """Busca a chave da API do DeepSeek no st.secrets"""
+    .lote-destaque {
+        background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 18px;
+        text-align: center;
+        font-size: 52px;
+        font-weight: bold;
+        margin-bottom: 12px;
+    }
+    .ordem-indicador {
+        background: #16A34A;
+        color: white;
+        padding: 12px;
+        border-radius: 10px;
+        text-align: center;
+        font-weight: bold;
+        margin: 8px 0;
+        font-size: 20px;
+    }
+    .banner-reproducao {
+        background: linear-gradient(135deg, #DC2626 0%, #991B1B 100%);
+        color: white !important;
+        padding: 18px;
+        border-radius: 14px;
+        margin-bottom: 12px;
+        font-size: 22px !important;
+        font-weight: 900 !important;
+        text-align: center;
+        border: 3px solid #EF4444;
+    }
+    .banner-venda {
+        background: linear-gradient(135deg, #EAB308 0%, #CA8A04 100%);
+        color: #000 !important;
+        padding: 16px;
+        border-radius: 14px;
+        margin-bottom: 12px;
+        font-size: 24px !important;
+        font-weight: 900 !important;
+        text-align: center;
+        border: 3px solid #FACC15;
+    }
+    .animal-info {
+        background: #1E293B;
+        color: white;
+        padding: 15px;
+        border-radius: 12px;
+        margin: 5px 0;
+        border: 1px solid #334155;
+        min-height: 85px;
+    }
+    .nome-animal-box {
+        background: #0284C7;
+        color: white;
+        padding: 14px;
+        border-radius: 12px;
+        margin-bottom: 12px;
+        font-size: 22px;
+        font-weight: bold;
+        text-align: center;
+    }
+    .gatilho-card {
+        background: linear-gradient(90deg, #EC4899 0%, #8B5CF6 100%);
+        color: white;
+        padding: 14px;
+        border-radius: 12px;
+        font-size: 18px;
+        margin: 6px 0;
+        font-weight: bold;
+    }
+    .ai-consideracoes-box {
+        background-color: #1E1B4B !important;
+        padding: 20px;
+        border-radius: 15px;
+        margin-bottom: 15px;
+        border-left: 8px solid #818CF8;
+    }
+    .ai-consideracoes-box, .ai-consideracoes-box * {
+        color: #FFFFFF !important;
+        font-size: 16px !important;
+        line-height: 1.6 !important;
+    }
+    .catalogo-header {
+        background: #F59E0B;
+        color: white;
+        padding: 10px;
+        border-radius: 10px;
+        text-align: center;
+        font-weight: bold;
+        font-size: 18px;
+        margin-bottom: 10px;
+    }
+    .pedigree-card {
+        background: #0F172A;
+        color: white;
+        padding: 14px;
+        border-radius: 12px;
+        margin: 5px 0;
+        border: 1px solid #334155;
+    }
+    .pedigree-card table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+    .pedigree-card td {
+        padding: 4px 6px;
+        border-bottom: 1px solid #1E293B;
+    }
+    .abertura-box {
+        background: linear-gradient(135deg, #065F46 0%, #047857 100%);
+        color: white !important;
+        padding: 16px;
+        border-radius: 14px;
+        margin-bottom: 12px;
+        font-size: 17px !important;
+        font-style: italic;
+        border: 2px solid #10B981;
+    }
+    .status-badge {
+        background: #334155;
+        color: white;
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        margin: 2px;
+        display: inline-block;
+    }
+</style>
+"""
+st.markdown(css_code, unsafe_allow_html=True)
+
+# ==================== API KEYS ====================
+def obter_api_keys():
+    ds_keys = []
+    ant_keys = []
     try:
         if "DEEPSEEK_API_KEY" in st.secrets:
-            return st.secrets["DEEPSEEK_API_KEY"]
-    except:
+            ds_keys.append(st.secrets["DEEPSEEK_API_KEY"])
+        if "ANTHROPIC_API_KEY" in st.secrets:
+            ant_keys.append(st.secrets["ANTHROPIC_API_KEY"])
+    except Exception:
         pass
-    return ""
+    return ds_keys, ant_keys
 
-@st.cache_data(show_spinner=False)
-def ler_ordem_entrada(file_bytes, api_key):
-    """Extrai texto do PDF e usa o DeepSeek para listar os lotes estruturados"""
-    texto_completo = ""
+# ==================== HELPERS ====================
+def normalizar_lote(valor):
+    if valor is None:
+        return ""
+    digitos = re.sub(r"\D", "", str(valor))
+    return str(int(digitos)) if digitos else ""
+
+def hash_bytes(b):
+    return hashlib.md5(b).hexdigest() if b else ""
+
+# ==================== PROCESSAMENTO EXATO DA O.E. (TABELA O.E. X LT) ====================
+@st.cache_data(ttl=7200, show_spinner=False)
+def extrair_ordem_entrada_tabela(file_bytes):
+    sequencia = []  # Lista dos Lotes (LT) na ordem que entram
+    mapa = {}       # Dicionario mapeado pelo número do LOTE (LT)
+
+    if not file_bytes:
+        return sequencia, mapa
+
     try:
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
-                texto_completo += (page.extract_text() or "") + "\n"
-    except Exception as e:
-        st.error(f"Erro ao abrir o PDF: {e}")
-        return []
+                tables = page.extract_tables()
+                for table in tables:
+                    for row in table:
+                        row_clean = [str(cell).strip() if cell else "" for cell in row]
+                        
+                        # Ignora cabecalho
+                        if any(header in "".join(row_clean).upper() for header in ["CATEGORIA", "VENDEDOR", "PRODUTO"]):
+                            if "LT" in "".join(row_clean).upper() or "O.E." in "".join(row_clean).upper():
+                                continue
 
-    prompt = f"""
-    Extraia os lotes desta Ordem de Entrada.
-    Retorne APENAS UM JSON com a lista 'lotes'. Para cada lote, extraia: 
-    - "numero_lote": apenas o número (ex: "01")
-    - "nome_animal": o nome limpo do animal
-    - "linha_original": a linha inteira exatamente como está no PDF
-    
-    TEXTO: {texto_completo[:8000]}
-    
-    FORMATO JSON ESPERADO:
-    {{
-      "lotes": [
-         {{"numero_lote": "01", "nome_animal": "NOME DO ANIMAL", "linha_original": "01 100% NOME DO ANIMAL..."}}
-      ]
-    }}
-    """
-    
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.1
-    }
-    
-    try:
-        res = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload, timeout=60).json()
-        dados = json.loads(res['choices'][0]['message']['content'])
-        return dados.get("lotes", [])
-    except Exception as e:
-        st.error("Falha ao ler a Ordem com DeepSeek. Verifique o limite da sua API.")
-        return []
+                        if len(row_clean) >= 2:
+                            oe_raw = row_clean[0] # Ex: "1°", "2°", "18°"
+                            lt_raw = row_clean[1] # Ex: "100", "23", "01"
+                            
+                            num_lt = normalizar_lote(lt_raw)
+                            
+                            if num_lt:
+                                posicao_texto = f"{oe_raw} A ENTRAR" if ("°" in oe_raw or "º" in oe_raw) else f"{oe_raw}º A ENTRAR"
+                                
+                                categoria = row_clean[2] if len(row_clean) > 2 else ""
+                                pelagem = row_clean[3] if len(row_clean) > 3 else ""
+                                produto = row_clean[4] if len(row_clean) > 4 else ""
+                                vendedor = row_clean[5] if len(row_clean) > 5 else ""
 
-@st.cache_data(show_spinner=False)
-def buscar_na_internet(nome_animal):
-    """Pesquisa o nome do animal no DuckDuckGo para encontrar pedigrees, premiações e histórico"""
-    if not nome_animal or len(nome_animal) < 4:
-        return "Nome muito curto para busca confiável."
-    
-    try:
-        query = f'"{nome_animal}" (leilão OR pedigree OR abcz OR abccmm OR cavalo OR nelore)'
-        resultados = DDGS().text(query, max_results=3)
-        texto_web = " ".join([r['body'] for r in resultados])
-        return texto_web if texto_web else "Nenhuma informação extra de destaque encontrada nos buscadores."
-    except Exception as e:
-        return f"A busca falhou ou bloqueou a conexão temporariamente."
+                                if num_lt not in mapa:
+                                    sequencia.append(num_lt)
 
-@st.cache_data(show_spinner=False)
-def analisar_lote_com_internet(lote_dados, info_web, api_key):
-    """Gera a canta do leiloeiro e os gatilhos unindo a O.E. com as informações da Internet"""
-    prompt = f"""
-    Você é um leiloeiro mestre de elite.
-    
-    DADOS DA O.E.: {lote_dados.get('linha_original', '')}
-    RESULTADO DA BUSCA NA INTERNET SOBRE '{lote_dados.get('nome_animal', '')}': {info_web}
-    
-    Gere um material focado em converter lances:
-    1. "abertura": Frase de impacto para gritar na pista (comece a venda).
-    2. "resumo_internet": O que achamos na internet sobre ele (seja honesto se não achou nada relevante, diga "Animal inédito...").
-    3. "parecer": Seu parecer técnico como leiloeiro animando a plateia.
-    4. "gatilhos": 3 gatilhos de venda curtos e explosivos.
-    
-    FORMATO JSON:
-    {{
-        "abertura": "...",
-        "resumo_internet": "...",
-        "parecer": "...",
-        "gatilhos": ["...", "...", "..."]
-    }}
-    """
-    
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.4
-    }
-    
+                                mapa[num_lt] = {
+                                    "lote": num_lt,              # LT (Ex: 100)
+                                    "oe": oe_raw,                # OE (Ex: 1°)
+                                    "posicao": posicao_texto,    # Ex: 1° A ENTRAR
+                                    "categoria": categoria,
+                                    "pelagem": pelagem,
+                                    "nome_animal": produto,
+                                    "produto": produto,
+                                    "vendedor": vendedor,
+                                    "qtd": "1"
+                                }
+    except Exception as e:
+        st.error(f"Erro ao extrair tabela do PDF: {str(e)}")
+
+    return sequencia, mapa
+
+# ==================== RENDERIZAR IMAGEM PDF ====================
+@st.cache_data(ttl=7200, show_spinner=False)
+def contar_paginas_pdf(file_bytes):
+    if not file_bytes: return 0
     try:
-        res = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload, timeout=30).json()
-        return json.loads(res['choices'][0]['message']['content'])
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf: return len(pdf.pages)
+    except Exception: return 0
+
+@st.cache_data(ttl=7200, show_spinner=False)
+def obter_imagem_bytes_pagina(file_bytes, num_pagina, resolucao=150):
+    if not file_bytes or num_pagina < 0: return None
+    try:
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+            if 0 <= num_pagina < len(pdf.pages):
+                img = pdf.pages[num_pagina].to_image(resolution=resolucao).original
+                buffer = BytesIO()
+                img.convert("RGB").save(buffer, format="JPEG", quality=85)
+                return buffer.getvalue()
     except Exception:
         return None
+    return None
 
-# ==================== INTERFACE STREAMLIT ====================
-def run():
-    st.title("🌐 Painel do Leiloeiro (O.E. + Internet)")
+# ==================== CLAUDE INDEXA CATÁLOGO ====================
+def claude_indexar_pagina_catalogo(img_bytes, ant_keys):
+    if not img_bytes or not ant_keys: return None
 
-    api_key = obter_chave_deepseek()
-    if not api_key:
-        st.warning("⚠️ Insira sua DEEPSEEK_API_KEY nos Secrets do Streamlit para o sistema funcionar.")
-        st.stop()
+    base64_image = base64.b64encode(img_bytes).decode('utf-8')
+    url = "https://api.anthropic.com/v1/messages"
 
-    with st.sidebar:
-        st.header("📂 Arquivo")
-        arquivo_oe = st.file_uploader("Suba a Ordem de Entrada (PDF)", type=["pdf"])
+    instrucao = """Esta é uma página de um CATÁLOGO de leilão.
+    Se for a ficha de um lote, extraia em JSON:
+    - numero_lote (apenas número, ex: "100", "23", "01")
+    - nome_animal
+    - registro
+    - raca
+    - sexo
+    - nascimento
+    - pelagem
+    - vendedor
+    - pai
+    - mae
+    - avo_paterno
+    - avo_paterna
+    - avo_materno
+    - avo_materna
+    - observacoes
 
-    if not arquivo_oe:
-        st.info("👈 Por favor, anexe o PDF da Ordem de Entrada na barra lateral.")
-        st.stop()
+    Se não for ficha de lote, retorne "numero_lote": null.
+    Retorne APENAS um JSON válido.
+    """
 
-    # Lê a O.E. apenas uma vez
-    with st.spinner("🤖 DeepSeek organizando a Ordem de Entrada..."):
-        lotes = ler_ordem_entrada(arquivo_oe.getvalue(), api_key)
-    
-    if not lotes:
-        st.error("Não foi possível extrair os lotes ou o PDF não possui padrão textual.")
-        st.stop()
-        
-    numeros = [str(l["numero_lote"]) for l in lotes]
-    
-    # Controle de Navegação de Lotes
-    col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
-    with col_nav2:
-        lote_selecionado = st.selectbox("🎯 Selecione o Lote para Investigar:", numeros)
-        
-    dados_lote_atual = next((l for l in lotes if str(l["numero_lote"]) == lote_selecionado), None)
-    
-    if dados_lote_atual:
-        st.markdown(f"### LOTE {lote_selecionado} - {dados_lote_atual.get('nome_animal', 'SEM NOME')}")
-        
-        # MOSTRA A LINHA DA O.E.
-        st.markdown("**📋 LINHA DESCRITA NA ORDEM DE ENTRADA:**")
-        st.markdown(f"<div class='linha-oe'>{dados_lote_atual.get('linha_original', '')}</div>", unsafe_allow_html=True)
-        
-        nome_busca = dados_lote_atual.get("nome_animal", "")
-        
-        # BUSCA NA INTERNET
-        with st.spinner(f"🌍 Vasculhando a internet por informações sobre '{nome_busca}'..."):
-            info_web = buscar_na_internet(nome_busca)
-            
-        # GERA A APRESENTAÇÃO
-        with st.spinner("🧠 Leiloeiro IA criando a apresentação..."):
-            analise = analisar_lote_com_internet(dados_lote_atual, info_web, api_key)
-            
-        if analise:
-            # ABERTURA
-            st.markdown(f"<div class='abertura'>🎙️ \"{analise.get('abertura', '')}\"</div>", unsafe_allow_html=True)
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("### 🌐 O que achei na Internet")
-                st.markdown(f"<div class='net-box'>🛰️ {analise.get('resumo_internet', '')}</div>", unsafe_allow_html=True)
-                
-                st.markdown("### 🧠 Parecer do Leiloeiro")
-                st.markdown(f"<div class='parecer'>{analise.get('parecer', '')}</div>", unsafe_allow_html=True)
-                
-            with col2:
-                st.markdown("### 🔥 Gatilhos para a Pista")
-                gatilhos = analise.get('gatilhos', [])
-                if gatilhos:
-                    for g in gatilhos:
-                        st.markdown(f"<div class='gatilho'>🚀 {g}</div>", unsafe_allow_html=True)
-                else:
-                    st.info("Nenhum gatilho gerado.")
+    payload = {
+        "model": "claude-3-5-sonnet-20241022",
+        "max_tokens": 1200,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": base64_image
+                    }
+                },
+                {"type": "text", "text": instrucao}
+            ]
+        }]
+    }
 
-if __name__ == "__main__":
-    run()
+    for api_key in ant_keys:
+        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            res_json = response.json()
+            if response.status_code == 200 and 'content' in res_json:
+                txt_parts = [c['text'] for c in res_json['content'] if c.get('type') == 'text']
+                texto = "\n".join(txt_parts).strip()
+                texto = re.sub(r"^```json|
