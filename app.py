@@ -20,7 +20,7 @@ css_code = """
     #MainMenu {visibility: hidden; display: none;}
     footer {visibility: hidden; display: none;}
     [data-testid="stToolbar"] {display: none;}
-    .block-container {padding-top: 3rem; padding-bottom: 2rem;}
+    .block-container {padding-top: 2.5rem; padding-bottom: 2rem;}
 
     .lote-destaque {
         background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
@@ -28,9 +28,10 @@ css_code = """
         padding: 20px;
         border-radius: 18px;
         text-align: center;
-        font-size: 52px;
+        font-size: 48px;
         font-weight: bold;
         margin-bottom: 12px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
     }
     .ordem-indicador {
         background: #16A34A;
@@ -50,14 +51,15 @@ css_code = """
         margin: 5px 0;
         border: 1px solid #334155;
         min-height: 85px;
+        text-align: center;
     }
     .nome-animal-box {
         background: #0284C7;
         color: white;
-        padding: 14px;
+        padding: 16px;
         border-radius: 12px;
         margin-bottom: 12px;
-        font-size: 22px;
+        font-size: 24px;
         font-weight: bold;
         text-align: center;
     }
@@ -66,17 +68,41 @@ css_code = """
         color: white;
         padding: 14px;
         border-radius: 12px;
-        font-size: 18px;
+        font-size: 17px;
         margin: 6px 0;
         font-weight: bold;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
     }
-    .ai-consideracoes-box {
+    .abertura-box {
+        background: linear-gradient(135deg, #065F46 0%, #047857 100%);
+        color: white !important;
+        padding: 18px;
+        border-radius: 14px;
+        margin-bottom: 15px;
+        font-size: 20px !important;
+        font-weight: bold;
+        font-style: italic;
+        border: 2px solid #10B981;
+    }
+    .canta-box {
         background-color: #1E1B4B !important;
-        padding: 20px;
+        padding: 22px;
         border-radius: 15px;
         margin-bottom: 15px;
         border-left: 8px solid #818CF8;
         color: white !important;
+        font-size: 17px;
+        line-height: 1.6;
+    }
+    .parecer-box {
+        background-color: #0F172A !important;
+        padding: 20px;
+        border-radius: 15px;
+        margin-bottom: 15px;
+        border-left: 8px solid #F59E0B;
+        color: white !important;
+        font-size: 16px;
+        line-height: 1.5;
     }
     .catalogo-header {
         background: #F59E0B;
@@ -102,27 +128,8 @@ css_code = """
         font-size: 14px;
     }
     .pedigree-card td {
-        padding: 4px 6px;
+        padding: 6px 8px;
         border-bottom: 1px solid #1E293B;
-    }
-    .abertura-box {
-        background: linear-gradient(135deg, #065F46 0%, #047857 100%);
-        color: white !important;
-        padding: 16px;
-        border-radius: 14px;
-        margin-bottom: 12px;
-        font-size: 17px !important;
-        font-style: italic;
-        border: 2px solid #10B981;
-    }
-    .status-badge {
-        background: #334155;
-        color: white;
-        padding: 6px 12px;
-        border-radius: 8px;
-        font-size: 13px;
-        margin: 2px;
-        display: inline-block;
     }
 </style>
 """
@@ -154,7 +161,7 @@ def normalizar_lote(valor):
 def hash_bytes(b):
     return hashlib.md5(b).hexdigest() if b else ""
 
-# ==================== PROCESSAMENTO DA O.E. (TABELA O.E. X LT) ====================
+# ==================== PROCESSAMENTO DA O.E. ====================
 @st.cache_data(ttl=7200, show_spinner=False)
 def extrair_ordem_entrada_tabela(file_bytes):
     sequencia = []
@@ -234,7 +241,7 @@ def obter_imagem_bytes_pagina(file_bytes, num_pagina, resolucao=150):
         return None
     return None
 
-# ==================== DEEPSEEK INDEXA O CATÁLOGO ====================
+# ==================== INDEXAÇÃO DO CATÁLOGO VIA DEEPSEEK ====================
 def deepseek_indexar_pagina_catalogo(texto_pagina, ds_keys):
     if not texto_pagina or not ds_keys:
         return None
@@ -244,7 +251,7 @@ TEXTO DA PÁGINA:
 {texto_pagina[:4000]}
 
 Se for a ficha de um lote, extraia em JSON:
-- "numero_lote": (apenas o número do lote, ex: "100", "23", "01")
+- "numero_lote": (apenas número, ex: "100", "23", "01")
 - "nome_animal": ""
 - "registro": ""
 - "raca": ""
@@ -314,7 +321,7 @@ def construir_indice_catalogo(file_bytes_cat, hash_arquivo, ds_keys, max_paginas
 def encontrar_no_indice(num_lote_oe, nome_animal_oe, indice):
     chave = normalizar_lote(num_lote_oe)
     if chave in indice:
-        return indice[chave], -1
+        return indice[chave]
 
     if nome_animal_oe:
         melhor_match = None
@@ -327,39 +334,47 @@ def encontrar_no_indice(num_lote_oe, nome_animal_oe, indice):
                     melhor_score = score
                     melhor_match = dados
         if melhor_match and melhor_score > 0.55:
-            return melhor_match, -1
+            return melhor_match
 
-    return None, -1
+    return None
 
-# ==================== DEEPSEEK CRUZA DADOS ====================
+# ==================== DEEPSEEK CRUZA E GERA CONTEÚDO ENRIQUECIDO ====================
 @st.cache_data(ttl=7200, show_spinner=False)
-def deepseek_cruzar_cached(num_lote, dados_ordem_str, dados_catalogo_str, ds_keys_tuple):
+def deepseek_gerar_conteudo_cached(num_lote, dados_ordem_str, dados_catalogo_str, ds_keys_tuple):
     ds_keys = list(ds_keys_tuple)
     dados_ordem = json.loads(dados_ordem_str)
-    dados_catalogo = json.loads(dados_catalogo_str)
+    dados_catalogo = json.loads(dados_catalogo_str) if dados_catalogo_str else {}
 
     if not ds_keys:
         return None
 
     prompt = f"""
-    Você é um locutor de leilão experiente. Cruze as informações do LOTE {num_lote} (Entrada O.E.: {dados_ordem.get('oe', '')}) e gere o roteiro.
+    Você é um leiloeiro rural de elite com anos de pista. Monte a canta do LOTE {num_lote} (Entrada O.E.: {dados_ordem.get('oe', '')}).
 
     DADOS DA ORDEM DE ENTRADA:
     {json.dumps(dados_ordem, ensure_ascii=False, indent=2)}
 
-    DADOS DO CATÁLOGO:
+    DADOS DO CATÁLOGO (se disponível):
     {json.dumps(dados_catalogo, ensure_ascii=False, indent=2)}
 
-    Retorne APENAS JSON:
+    Gere um JSON completo com:
+    1. "abertura": Frase de impacto curta (máx. 25 palavras) para começar o leilão com energia.
+    2. "apresentacao_detalhada": Texto fluído de canta para o leiloeiro ler na pista, descrevendo o animal, vendedor, categoria e potenciais virtudes.
+    3. "parecer_ia": Análise comercial e técnica do lote para valorizar o produto na pista (1 parágrafo).
+    4. "encartes": Lista com 3 encartes para tela (ex: CATEGORIA, PELAGEM, VENDEDOR).
+    5. "gatilhos": 4 a 5 gatilhos de pista curtos, agressivos e impactantes para soltar durante os lances.
+
+    Retorne APENAS um JSON no formato:
     {{
-        "abertura": "Frase animada de abertura (máx. 25 palavras).",
+        "abertura": "...",
+        "apresentacao_detalhada": "...",
+        "parecer_ia": "...",
         "encartes": [
             {{"titulo": "CATEGORIA", "valor": "..."}},
             {{"titulo": "PELAGEM", "valor": "..."}},
             {{"titulo": "VENDEDOR", "valor": "..."}}
         ],
-        "gatilhos": ["Gatilho 1", "Gatilho 2", "Gatilho 3"],
-        "observacao_destaque": "Resumo relevante se houver"
+        "gatilhos": ["Gatilho 1", "Gatilho 2", "Gatilho 3", "Gatilho 4"]
     }}
     """
 
@@ -382,11 +397,11 @@ def deepseek_cruzar_cached(num_lote, dados_ordem_str, dados_catalogo_str, ds_key
 
     return None
 
-def deepseek_cruzar(num_lote, dados_ordem, dados_catalogo, ds_keys):
-    return deepseek_cruzar_cached(
+def deepseek_gerar_conteudo(num_lote, dados_ordem, dados_catalogo, ds_keys):
+    return deepseek_gerar_conteudo_cached(
         num_lote,
         json.dumps(dados_ordem, sort_keys=True),
-        json.dumps(dados_catalogo, sort_keys=True),
+        json.dumps(dados_catalogo or {}, sort_keys=True),
         tuple(ds_keys)
     )
 
@@ -401,10 +416,10 @@ def renderizar_pedigree(dados_catalogo):
         return
 
     html = '<div class="pedigree-card"><table>'
-    html += f'<tr><td><strong>PAI</strong></td><td>{p or "-"}</td><td><strong>AVÔ PATERNO</strong></td><td>{ap or "-"}</td></tr>'
-    html += f'<tr><td></td><td></td><td><strong>AVÓ PATERNA</strong></td><td>{apm or "-"}</td></tr>'
-    html += f'<tr><td><strong>MÃE</strong></td><td>{m or "-"}</td><td><strong>AVÔ MATERNO</strong></td><td>{am or "-"}</td></tr>'
-    html += f'<tr><td></td><td></td><td><strong>AVÓ MATERNA</strong></td><td>{amm or "-"}</td></tr>'
+    html += f'<tr><td><strong>PAI:</strong> {p or "-"}</td><td><strong>AVÔ PATERNO:</strong> {ap or "-"}</td></tr>'
+    html += f'<tr><td></td><td><strong>AVÓ PATERNA:</strong> {apm or "-"}</td></tr>'
+    html += f'<tr><td><strong>MÃE:</strong> {m or "-"}</td><td><strong>AVÔ MATERNO:</strong> {am or "-"}</td></tr>'
+    html += f'<tr><td></td><td><strong>AVÓ MATERNA:</strong> {amm or "-"}</td></tr>'
     html += '</table></div>'
     st.markdown(html, unsafe_allow_html=True)
 
@@ -414,13 +429,13 @@ def run():
 
     with st.sidebar:
         st.header("📂 Arquivos")
-        file_oe = st.file_uploader("Ordem de Entrada (PDF)", type="pdf", key="oe")
-        file_cat = st.file_uploader("Catálogo (PDF)", type="pdf", key="cat")
+        file_oe = st.file_uploader("Ordem de Entrada (PDF) *Obrigatório*", type="pdf", key="oe")
+        file_cat = st.file_uploader("Catálogo (PDF) *Opcional*", type="pdf", key="cat")
 
         st.markdown("---")
         modo_ordenacao = st.radio("Ordem de Exibição:", ["ORDEM DE ENTRADA (O.E.)", "ORDEM NUMÉRICA (LT)"], index=0)
         max_paginas_catalogo = st.number_input(
-            "Máx. de páginas do catálogo pra indexar", min_value=1, max_value=300, value=60
+            "Máx. páginas catálogo", min_value=1, max_value=300, value=60
         )
 
     file_bytes_oe = file_oe.getvalue() if file_oe else None
@@ -452,6 +467,7 @@ def run():
     num_lote = lista_lotes[st.session_state.lote_idx]
     dados_lote = mapa_oe.get(num_lote, {})
 
+    # Barra superior de indicador do lote
     st.markdown(
         f'<div class="ordem-indicador">{dados_lote.get("posicao", "")} | LOTE {num_lote} ({st.session_state.lote_idx + 1} de {len(lista_lotes)})</div>',
         unsafe_allow_html=True
@@ -478,73 +494,113 @@ def run():
         st.session_state.lote_idx = idx_selecionado
         st.rerun()
 
-    dados_catalogo, _ = encontrar_no_indice(num_lote, dados_lote.get("nome_animal", ""), indice_catalogo)
+    # Busca dados no catálogo se houver
+    dados_catalogo = encontrar_no_indice(num_lote, dados_lote.get("nome_animal", ""), indice_catalogo) if indice_catalogo else None
     pagina_detectada = dados_catalogo.get("_pagina", -1) if dados_catalogo else -1
 
-    if file_bytes_cat and pagina_detectada < 0:
-        st.warning(f"⚠️ Lote {num_lote} não encontrado no catálogo. Escolha a página manualmente:")
-        pagina_manual = st.number_input(
-            "Página do catálogo:", min_value=1, max_value=max(1, total_paginas_cat),
-            value=1, key=f"pag_{num_lote}"
-        )
-        pagina_detectada = pagina_manual - 1
-
+    # Gera conteúdo via IA DeepSeek
     dados_finais = None
-    if dados_catalogo and ds_keys:
-        dados_finais = deepseek_cruzar(num_lote, dados_lote, dados_catalogo, ds_keys)
+    if ds_keys:
+        with st.spinner("🧠 DeepSeek preparando a pista..."):
+            dados_finais = deepseek_gerar_conteudo(num_lote, dados_lote, dados_catalogo, ds_keys)
 
-    col_esquerda, col_direita = st.columns([1, 1])
+    # ==================== RENDERIZAÇÃO DE LAYOUT ====================
+    
+    # CASO 1: TEM CATÁLOGO CARREGADO
+    if file_bytes_cat:
+        col_esquerda, col_direita = st.columns([1, 1])
 
-    with col_esquerda:
-        if dados_finais and dados_finais.get("abertura"):
-            st.markdown(f'<div class="abertura-box">🎙️ "{dados_finais["abertura"]}"</div>', unsafe_allow_html=True)
-        if dados_finais and dados_finais.get("observacao_destaque"):
-            st.markdown(
-                f'<div class="ai-consideracoes-box"><h3 style="margin-top:0; color:#818CF8; font-size:18px;">🤖 OBSERVAÇÃO</h3>'
-                f'<div>{dados_finais["observacao_destaque"]}</div></div>',
-                unsafe_allow_html=True
-            )
+        with col_esquerda:
+            if pagina_detectada < 0:
+                st.info(f"💡 Lote {num_lote} não localizado automaticamente no catálogo. Selecione a página:")
+                pagina_manual = st.number_input(
+                    "Página do catálogo:", min_value=1, max_value=max(1, total_paginas_cat),
+                    value=1, key=f"pag_{num_lote}"
+                )
+                pagina_detectada = pagina_manual - 1
 
-        if file_bytes_cat and pagina_detectada >= 0:
-            st.markdown(f'<div class="catalogo-header">📖 CATÁLOGO - PÁGINA {pagina_detectada + 1} DE {total_paginas_cat}</div>', unsafe_allow_html=True)
-            img_bytes = obter_imagem_bytes_pagina(file_bytes_cat, pagina_detectada)
-            if img_bytes:
-                st.image(img_bytes, use_container_width=True)
+            if pagina_detectada >= 0:
+                st.markdown(f'<div class="catalogo-header">📖 CATÁLOGO - PÁGINA {pagina_detectada + 1} DE {total_paginas_cat}</div>', unsafe_allow_html=True)
+                img_bytes = obter_imagem_bytes_pagina(file_bytes_cat, pagina_detectada)
+                if img_bytes:
+                    st.image(img_bytes, use_container_width=True)
 
-        if dados_catalogo:
-            with st.expander("📖 Dados do Catálogo (DeepSeek)"):
-                st.json(dados_catalogo)
+            if dados_catalogo:
+                with st.expander("📖 Dados do Catálogo (JSON)"):
+                    st.json(dados_catalogo)
 
-    with col_direita:
-        st.markdown(
-            f'<div class="lote-destaque">LOTE {num_lote}<br>'
-            f'<span style="font-size: 24px;">{dados_lote.get("posicao", "")}</span></div>',
-            unsafe_allow_html=True
-        )
+        with col_direita:
+            st.markdown(f'<div class="lote-destaque">LOTE {num_lote}<br><span style="font-size: 24px;">{dados_lote.get("posicao", "")}</span></div>', unsafe_allow_html=True)
+            
+            nome_exibir = (dados_catalogo or {}).get("nome_animal") or dados_lote.get("nome_animal", "")
+            if nome_exibir:
+                st.markdown(f'<div class="nome-animal-box">🐴 {nome_exibir}</div>', unsafe_allow_html=True)
 
-        nome_exibir = (dados_catalogo or {}).get("nome_animal") or dados_lote.get("nome_animal", "")
+            if dados_finais and dados_finais.get("abertura"):
+                st.markdown(f'<div class="abertura-box">🎙️ "{dados_finais["abertura"]}"</div>', unsafe_allow_html=True)
+
+            st.markdown("### 📋 INFORMAÇÕES DA O.E.")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown(f'<div class="animal-info"><strong>CATEGORIA:</strong><br>{dados_lote.get("categoria", "-")}</div>', unsafe_allow_html=True)
+            with col2:
+                st.markdown(f'<div class="animal-info"><strong>PELAGEM:</strong><br>{dados_lote.get("pelagem", "-")}</div>', unsafe_allow_html=True)
+            with col3:
+                st.markdown(f'<div class="animal-info"><strong>VENDEDOR:</strong><br>{dados_lote.get("vendedor", "-")}</div>', unsafe_allow_html=True)
+
+            if dados_finais and dados_finais.get("apresentacao_detalhada"):
+                st.markdown("### 📢 CANTA DO LEILOEIRO")
+                st.markdown(f'<div class="canta-box">{dados_finais["apresentacao_detalhada"]}</div>', unsafe_allow_html=True)
+
+            if dados_catalogo:
+                st.markdown("### 🧬 GENEALOGIA")
+                renderizar_pedigree(dados_catalogo)
+
+            st.markdown("### 🎤 GATILHOS DE PISTA")
+            if dados_finais and dados_finais.get("gatilhos"):
+                for g in dados_finais["gatilhos"]:
+                    st.markdown(f'<div class="gatilho-card">🔥 {g}</div>', unsafe_allow_html=True)
+
+    # CASO 2: SEM CATÁLOGO (LAYOUT COMPLETO / FULL SCREEN)
+    else:
+        st.markdown(f'<div class="lote-destaque">LOTE {num_lote} | {dados_lote.get("posicao", "")}</div>', unsafe_allow_html=True)
+        
+        nome_exibir = dados_lote.get("nome_animal", "")
         if nome_exibir:
             st.markdown(f'<div class="nome-animal-box">🐴 {nome_exibir}</div>', unsafe_allow_html=True)
 
-        st.markdown("### 📋 INFORMAÇÕES DA ORDEM DE ENTRADA")
-        col1, col2, col3 = st.columns(3)
+        if dados_finais and dados_finais.get("abertura"):
+            st.markdown(f'<div class="abertura-box">🎙️ ABERTURA DE PISTA: "{dados_finais["abertura"]}"</div>', unsafe_allow_html=True)
+
+        st.markdown("### 📋 INFORMAÇÕES DO LOTE (ORDEM DE ENTRADA)")
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.markdown(f'<div class="animal-info"><strong>CATEGORIA:</strong><br>{dados_lote.get("categoria", "-")}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="animal-info"><strong>LOTE:</strong><br>{num_lote}</div>', unsafe_allow_html=True)
         with col2:
-            st.markdown(f'<div class="animal-info"><strong>PELAGEM:</strong><br>{dados_lote.get("pelagem", "-")}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="animal-info"><strong>CATEGORIA:</strong><br>{dados_lote.get("categoria", "-")}</div>', unsafe_allow_html=True)
         with col3:
+            st.markdown(f'<div class="animal-info"><strong>PELAGEM:</strong><br>{dados_lote.get("pelagem", "-")}</div>', unsafe_allow_html=True)
+        with col4:
             st.markdown(f'<div class="animal-info"><strong>VENDEDOR:</strong><br>{dados_lote.get("vendedor", "-")}</div>', unsafe_allow_html=True)
 
-        if dados_catalogo:
-            st.markdown("### 🧬 GENEALOGIA")
-            renderizar_pedigree(dados_catalogo)
-            if dados_catalogo.get("observacoes"):
-                st.markdown(f'<span class="status-badge">📌 {dados_catalogo["observacoes"]}</span>', unsafe_allow_html=True)
+        col_esq, col_dir = st.columns([1.2, 1])
 
-        st.markdown("### 🎤 GATILHOS DE PISTA")
-        if dados_finais and dados_finais.get("gatilhos"):
-            for g in dados_finais["gatilhos"]:
-                st.markdown(f'<div class="gatilho-card">🔥 {g}</div>', unsafe_allow_html=True)
+        with col_esq:
+            if dados_finais and dados_finais.get("apresentacao_detalhada"):
+                st.markdown("### 📢 CANTA COMPLETA DO LEILOEIRO")
+                st.markdown(f'<div class="canta-box">{dados_finais["apresentacao_detalhada"]}</div>', unsafe_allow_html=True)
+
+            if dados_finais and dados_finais.get("parecer_ia"):
+                st.markdown("### 🧠 PARECER TÉCNICO & COMERCIAL DA IA")
+                st.markdown(f'<div class="parecer-box">{dados_finais["parecer_ia"]}</div>', unsafe_allow_html=True)
+
+        with col_dir:
+            st.markdown("### 🎤 GATILHOS DE PISTA (DEEPSEEK)")
+            if dados_finais and dados_finais.get("gatilhos"):
+                for g in dados_finais["gatilhos"]:
+                    st.markdown(f'<div class="gatilho-card">🔥 {g}</div>', unsafe_allow_html=True)
+            else:
+                st.info("Carregando gatilhos...")
 
 if __name__ == "__main__":
     run()
