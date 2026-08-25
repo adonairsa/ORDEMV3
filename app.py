@@ -14,121 +14,121 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ==================== CSS ====================
+# ==================== CSS (OTIMIZADO PARA TABLET) ====================
 css_code = """
 <style>
     #MainMenu {visibility: hidden; display: none;}
     footer {visibility: hidden; display: none;}
     [data-testid="stToolbar"] {display: none;}
-    .block-container {padding-top: 2.5rem; padding-bottom: 2rem;}
+    .block-container {padding-top: 1rem; padding-bottom: 1rem;}
 
     .lote-destaque {
         background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
         color: white;
-        padding: 20px;
-        border-radius: 18px;
+        padding: 16px;
+        border-radius: 16px;
         text-align: center;
-        font-size: 48px;
+        font-size: 42px;
         font-weight: bold;
-        margin-bottom: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        margin-bottom: 10px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     }
     .ordem-indicador {
         background: #16A34A;
         color: white;
-        padding: 12px;
+        padding: 10px;
         border-radius: 10px;
         text-align: center;
         font-weight: bold;
-        margin: 8px 0;
-        font-size: 20px;
+        margin: 4px 0 10px 0;
+        font-size: 18px;
     }
     .animal-info {
         background: #1E293B;
         color: white;
-        padding: 15px;
-        border-radius: 12px;
-        margin: 5px 0;
+        padding: 12px;
+        border-radius: 10px;
+        margin: 4px 0;
         border: 1px solid #334155;
-        min-height: 85px;
+        min-height: 75px;
         text-align: center;
     }
     .nome-animal-box {
         background: #0284C7;
         color: white;
-        padding: 16px;
-        border-radius: 12px;
-        margin-bottom: 12px;
-        font-size: 24px;
+        padding: 12px;
+        border-radius: 10px;
+        margin-bottom: 10px;
+        font-size: 22px;
         font-weight: bold;
         text-align: center;
     }
     .gatilho-card {
         background: linear-gradient(90deg, #EC4899 0%, #8B5CF6 100%);
         color: white;
-        padding: 14px;
-        border-radius: 12px;
-        font-size: 17px;
-        margin: 6px 0;
+        padding: 12px;
+        border-radius: 10px;
+        font-size: 16px;
+        margin: 5px 0;
         font-weight: bold;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
     }
     .abertura-box {
         background: linear-gradient(135deg, #065F46 0%, #047857 100%);
         color: white !important;
-        padding: 18px;
-        border-radius: 14px;
-        margin-bottom: 15px;
-        font-size: 20px !important;
+        padding: 14px;
+        border-radius: 12px;
+        margin-bottom: 12px;
+        font-size: 18px !important;
         font-weight: bold;
         font-style: italic;
         border: 2px solid #10B981;
     }
     .canta-box {
         background-color: #1E1B4B !important;
-        padding: 22px;
-        border-radius: 15px;
-        margin-bottom: 15px;
-        border-left: 8px solid #818CF8;
-        color: white !important;
-        font-size: 17px;
-        line-height: 1.6;
-    }
-    .parecer-box {
-        background-color: #0F172A !important;
-        padding: 20px;
-        border-radius: 15px;
-        margin-bottom: 15px;
-        border-left: 8px solid #F59E0B;
+        padding: 18px;
+        border-radius: 12px;
+        margin-bottom: 12px;
+        border-left: 6px solid #818CF8;
         color: white !important;
         font-size: 16px;
         line-height: 1.5;
     }
+    .parecer-box {
+        background-color: #0F172A !important;
+        padding: 16px;
+        border-radius: 12px;
+        margin-bottom: 12px;
+        border-left: 6px solid #F59E0B;
+        color: white !important;
+        font-size: 15px;
+        line-height: 1.4;
+    }
     .catalogo-header {
         background: #F59E0B;
         color: white;
-        padding: 10px;
-        border-radius: 10px;
+        padding: 8px;
+        border-radius: 8px;
         text-align: center;
         font-weight: bold;
-        font-size: 18px;
-        margin-bottom: 10px;
+        font-size: 16px;
+        margin-bottom: 8px;
     }
     .pedigree-card {
         background: #0F172A;
         color: white;
-        padding: 14px;
-        border-radius: 12px;
-        margin: 5px 0;
+        padding: 12px;
+        border-radius: 10px;
+        margin: 4px 0;
         border: 1px solid #334155;
     }
     .pedigree-card table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 14px;
+        font-size: 13px;
     }
     .pedigree-card td {
-        padding: 6px 8px;
+        padding: 4px 6px;
         border-bottom: 1px solid #1E293B;
     }
 </style>
@@ -507,6 +507,7 @@ def run():
     if file_bytes_cat:
         col_esquerda, col_direita = st.columns([1, 1])
 
+        # COLUNA ESQUERDA: CATÁLOGO ELEVADO + GATILHOS LOGO ABAIXO
         with col_esquerda:
             if pagina_detectada < 0:
                 pagina_manual = st.number_input(
@@ -525,6 +526,13 @@ def run():
                 with st.expander("📖 Dados do Catálogo (JSON)"):
                     st.json(dados_catalogo)
 
+            # GATILHOS DE PISTA MOVIDOS PARA DEBAIXO DO CATÁLOGO
+            st.markdown("### 🎤 GATILHOS DE PISTA")
+            if dados_finais and dados_finais.get("gatilhos"):
+                for g in dados_finais["gatilhos"]:
+                    st.markdown(f'<div class="gatilho-card">🔥 {g}</div>', unsafe_allow_html=True)
+
+        # COLUNA DIREITA: INFORMAÇÕES E CANTA DO LEILOEIRO
         with col_direita:
             st.markdown(f'<div class="lote-destaque">LOTE {num_lote}<br><span style="font-size: 24px;">{dados_lote.get("posicao", "")}</span></div>', unsafe_allow_html=True)
             
@@ -551,11 +559,6 @@ def run():
             if dados_catalogo:
                 st.markdown("### 🧬 GENEALOGIA")
                 renderizar_pedigree(dados_catalogo)
-
-            st.markdown("### 🎤 GATILHOS DE PISTA")
-            if dados_finais and dados_finais.get("gatilhos"):
-                for g in dados_finais["gatilhos"]:
-                    st.markdown(f'<div class="gatilho-card">🔥 {g}</div>', unsafe_allow_html=True)
 
     # CASO 2: SEM CATÁLOGO (LAYOUT COMPLETO / FULL SCREEN)
     else:
