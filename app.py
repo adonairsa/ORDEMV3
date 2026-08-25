@@ -338,7 +338,7 @@ def encontrar_no_indice(num_lote_oe, nome_animal_oe, indice):
 
     return None
 
-# ==================== DEEPSEEK CRUZA E GERA CONTEÚDO ENRIQUECIDO ====================
+# ==================== DEEPSEEK CRUZA E GERA CONTEÚDO ====================
 @st.cache_data(ttl=7200, show_spinner=False)
 def deepseek_gerar_conteudo_cached(num_lote, dados_ordem_str, dados_catalogo_str, ds_keys_tuple):
     ds_keys = list(ds_keys_tuple)
@@ -349,7 +349,7 @@ def deepseek_gerar_conteudo_cached(num_lote, dados_ordem_str, dados_catalogo_str
         return None
 
     prompt = f"""
-    Você é um leiloeiro rural de elite com anos de pista. Monte a canta do LOTE {num_lote} (Entrada O.E.: {dados_ordem.get('oe', '')}).
+    Você é um leiloeiro rural de elite. Monte a canta do LOTE {num_lote} (Entrada O.E.: {dados_ordem.get('oe', '')}).
 
     DADOS DA ORDEM DE ENTRADA:
     {json.dumps(dados_ordem, ensure_ascii=False, indent=2)}
@@ -467,7 +467,6 @@ def run():
     num_lote = lista_lotes[st.session_state.lote_idx]
     dados_lote = mapa_oe.get(num_lote, {})
 
-    # Barra superior de indicador do lote
     st.markdown(
         f'<div class="ordem-indicador">{dados_lote.get("posicao", "")} | LOTE {num_lote} ({st.session_state.lote_idx + 1} de {len(lista_lotes)})</div>',
         unsafe_allow_html=True
@@ -494,11 +493,9 @@ def run():
         st.session_state.lote_idx = idx_selecionado
         st.rerun()
 
-    # Busca dados no catálogo se houver
     dados_catalogo = encontrar_no_indice(num_lote, dados_lote.get("nome_animal", ""), indice_catalogo) if indice_catalogo else None
     pagina_detectada = dados_catalogo.get("_pagina", -1) if dados_catalogo else -1
 
-    # Gera conteúdo via IA DeepSeek
     dados_finais = None
     if ds_keys:
         with st.spinner("🧠 DeepSeek preparando a pista..."):
@@ -512,7 +509,6 @@ def run():
 
         with col_esquerda:
             if pagina_detectada < 0:
-                st.info(f"💡 Lote {num_lote} não localizado automaticamente no catálogo. Selecione a página:")
                 pagina_manual = st.number_input(
                     "Página do catálogo:", min_value=1, max_value=max(1, total_paginas_cat),
                     value=1, key=f"pag_{num_lote}"
@@ -599,8 +595,6 @@ def run():
             if dados_finais and dados_finais.get("gatilhos"):
                 for g in dados_finais["gatilhos"]:
                     st.markdown(f'<div class="gatilho-card">🔥 {g}</div>', unsafe_allow_html=True)
-            else:
-                st.info("Carregando gatilhos...")
 
 if __name__ == "__main__":
     run()
