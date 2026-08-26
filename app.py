@@ -5,6 +5,7 @@ import requests
 import json
 import difflib
 import hashlib
+import threading
 from io import BytesIO
 
 st.set_page_config(
@@ -17,6 +18,7 @@ st.set_page_config(
 # ==================== CONFIG DE LOTE (BATCH) ====================
 BATCH_PAGINAS_PADRAO = 5   # páginas de catálogo por chamada ao DeepSeek
 BATCH_LOTES_PADRAO = 8     # lotes por chamada ao DeepSeek na geração de conteúdo
+QTD_PRE_CARREGAR = 3       # quantos lotes futuros pré-carregar em segundo plano
 
 # ==================== CSS (OTIMIZADO PARA TABLET) ====================
 css_code = """
@@ -271,6 +273,41 @@ def obter_imagem_bytes_pagina(file_bytes, num_pagina, resolucao=150):
     except Exception:
         return None
     return None
+
+def _prefetch_paginas_worker(file_bytes, paginas):
+    """Roda em thread separada: só esquenta o cache de obter_imagem_bytes_pagina
+    pra quando o usuário clicar em 'Próximo', a imagem já estar pronta."""
+    for p in paginas:
+        try:
+            obter_imagem_bytes_pagina(file_bytes, p)
+        except Exception:
+            pass
+
+def pre_carregar_lotes_vizinhos(file_bytes_cat, lista_lotes, idx_atual, mapa_oe, indice_catalogo, qtd=QTD_PRE_CARREGAR):
+    """Pré-carrega em segundo plano a imagem da página dos lotes vizinhos —
+    tanto os próximos quanto os anteriores — pra navegar em qualquer direção
+    (Próximo ou Anterior) sem esperar renderização."""
+    if not file_bytes_cat or not indice_catalogo:
+        return
+    paginas_vizinhas = []
+    offsets = list(range(-qtd, 0)) + list(range(1, qtd + 1))  # anteriores e próximos
+    for offset in offsets:
+        idx_vizinho = idx_atual + offset
+        if idx_vizinho < 0 or idx_vizinho >= len(lista_lotes):
+            continue
+        lt_vizinho = lista_lotes[idx_vizinho]
+        dados_lote_vizinho = mapa_oe.get(lt_vizinho, {})
+        dados_cat_vizinho = encontrar_no_indice(lt_vizinho, dados_lote_vizinho.get("nome_animal", ""), indice_catalogo)
+        if dados_cat_vizinho:
+            pagina = dados_cat_vizinho.get("_pagina", -1)
+            if pagina >= 0:
+                paginas_vizinhas.append(pagina)
+    if paginas_vizinhas:
+        threading.Thread(
+            target=_prefetch_paginas_worker,
+            args=(file_bytes_cat, paginas_vizinhas),
+            daemon=True
+        ).start()
 
 @st.cache_data(ttl=7200, show_spinner=False)
 def extrair_textos_paginas(file_bytes, max_paginas):
@@ -725,6 +762,9 @@ def run():
 
     dados_catalogo = encontrar_no_indice(num_lote, dados_lote.get("nome_animal", ""), indice_catalogo) if indice_catalogo else None
     pagina_detectada = dados_catalogo.get("_pagina", -1) if dados_catalogo else -1
+
+    # pré-carrega em segundo plano a imagem dos próximos lotes (cache warming)
+    pre_carregar_proximos_lotes(file_bytes_cat, lista_lotes, st.session_state.lote_idx, mapa_oe, indice_catalogo)
 
     # 1) tenta pegar do lote pré-processado (sem chamada de IA);
     # 2) se não achou (ex: erro pontual no batch), cai no cálculo individual
