@@ -14,6 +14,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ==================== CONFIG DE LOTE (BATCH) ====================
+BATCH_PAGINAS_PADRAO = 5   # páginas de catálogo por chamada ao DeepSeek
+BATCH_LOTES_PADRAO = 8     # lotes por chamada ao DeepSeek na geração de conteúdo
+
 # ==================== CSS (OTIMIZADO PARA TABLET) ====================
 css_code = """
 <style>
@@ -131,6 +135,15 @@ css_code = """
         padding: 4px 6px;
         border-bottom: 1px solid #1E293B;
     }
+    .status-processamento {
+        background: #0F172A;
+        color: #94A3B8;
+        padding: 10px;
+        border-radius: 8px;
+        font-size: 13px;
+        margin-bottom: 8px;
+        border: 1px solid #1E293B;
+    }
 </style>
 """
 st.markdown(css_code, unsafe_allow_html=True)
@@ -161,7 +174,25 @@ def normalizar_lote(valor):
 def hash_bytes(b):
     return hashlib.md5(b).hexdigest() if b else ""
 
-# ==================== PROCESSAMENTO DA O.E. ====================
+def extrair_json(texto):
+    """Extrai o primeiro objeto/array JSON válido de um texto que pode vir
+    com ```json ... ``` ou com texto antes/depois."""
+    if not texto:
+        return None
+    limpo = re.sub(r"```json|```", "", texto).strip()
+    try:
+        return json.loads(limpo)
+    except Exception:
+        pass
+    match = re.search(r"(\{.*\}|\[.*\])", limpo, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            return None
+    return None
+
+# ==================== PROCESSAMENTO DA O.E. (SEM IA — TABELA) ====================
 @st.cache_data(ttl=7200, show_spinner=False)
 def extrair_ordem_entrada_tabela(file_bytes):
     sequencia = []
@@ -177,7 +208,7 @@ def extrair_ordem_entrada_tabela(file_bytes):
                 for table in tables:
                     for row in table:
                         row_clean = [str(cell).strip() if cell else "" for cell in row]
-                        
+
                         if any(header in "".join(row_clean).upper() for header in ["CATEGORIA", "VENDEDOR", "PRODUTO"]):
                             if "LT" in "".join(row_clean).upper() or "O.E." in "".join(row_clean).upper():
                                 continue
@@ -185,12 +216,12 @@ def extrair_ordem_entrada_tabela(file_bytes):
                         if len(row_clean) >= 2:
                             oe_raw = row_clean[0]
                             lt_raw = row_clean[1]
-                            
+
                             num_lt = normalizar_lote(lt_raw)
-                            
+
                             if num_lt:
                                 posicao_texto = f"{oe_raw} A ENTRAR" if ("°" in oe_raw or "º" in oe_raw) else f"{oe_raw}º A ENTRAR"
-                                
+
                                 categoria = row_clean[2] if len(row_clean) > 2 else ""
                                 pelagem = row_clean[3] if len(row_clean) > 3 else ""
                                 produto = row_clean[4] if len(row_clean) > 4 else ""
@@ -241,38 +272,70 @@ def obter_imagem_bytes_pagina(file_bytes, num_pagina, resolucao=150):
         return None
     return None
 
-# ==================== INDEXAÇÃO DO CATÁLOGO VIA DEEPSEEK ====================
-def deepseek_indexar_pagina_catalogo(texto_pagina, ds_keys):
-    if not texto_pagina or not ds_keys:
-        return None
+@st.cache_data(ttl=7200, show_spinner=False)
+def extrair_textos_paginas(file_bytes, max_paginas):
+    """Extrai o texto de cada página do catálogo uma única vez (cacheado)."""
+    paginas_extraidas = []
+    if not file_bytes:
+        return paginas_extraidas
+    try:
+        with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+            total = min(len(pdf.pages), max_paginas)
+            for i in range(total):
+                txt = pdf.pages[i].extract_text() or ""
+                paginas_extraidas.append((i, txt))
+    except Exception:
+        pass
+    return paginas_extraidas
 
-    prompt = f"""Esta é uma página de um CATÁLOGO de leilão.
-TEXTO DA PÁGINA:
-{texto_pagina[:4000]}
+# ==================== INDEXAÇÃO DO CATÁLOGO VIA DEEPSEEK (EM LOTE) ====================
+def deepseek_indexar_paginas_lote(bloco_paginas, _ds_keys):
+    """bloco_paginas: lista de (num_pagina, texto). Manda VÁRIAS páginas numa
+    única chamada e recebe um array de resultados na mesma ordem — reduz
+    drasticamente o número de chamadas em relação a 1 por página."""
+    if not bloco_paginas or not _ds_keys:
+        return [None] * len(bloco_paginas), "sem páginas ou sem chave"
 
-Se for a ficha de um lote, extraia em JSON:
-- "numero_lote": (apenas número, ex: "100", "23", "01")
-- "nome_animal": ""
-- "registro": ""
-- "raca": ""
-- "sexo": ""
-- "nascimento": ""
-- "pelagem": ""
-- "vendedor": ""
-- "pai": ""
-- "mae": ""
-- "avo_paterno": ""
-- "avo_paterna": ""
-- "avo_materno": ""
-- "avo_materna": ""
-- "observacoes": ""
+    corpo_paginas = ""
+    for pos, (num_pag, txt) in enumerate(bloco_paginas):
+        trecho = (txt or "").strip()[:2500]
+        if not trecho:
+            trecho = "(página sem texto extraível)"
+        corpo_paginas += f"\n=== PÁGINA {pos + 1} (pág. real {num_pag + 1}) ===\n{trecho}\n"
 
-Se a página NÃO for a ficha de um lote, retorne "numero_lote": null.
-Retorne APENAS um JSON válido.
+    prompt = f"""Estas são {len(bloco_paginas)} páginas de um CATÁLOGO de leilão, na
+ordem PÁGINA 1, PÁGINA 2, etc. Cada página pode ser a capa, uma página de
+regras/informações, ou a ficha de UM animal/lote específico.
+{corpo_paginas}
+
+Para CADA página, na mesma ordem, extraia (se for ficha de lote):
+numero_lote, nome_animal, registro, raca, sexo, nascimento, pelagem, vendedor,
+pai, mae, avo_paterno, avo_paterna, avo_materno, avo_materna, observacoes.
+
+Se a página NÃO for ficha de lote (capa, regras, índice, sem texto), retorne
+"numero_lote": null e os outros campos vazios — mas AINDA ASSIM inclua um
+objeto pra ela no array, na posição correta.
+
+Retorne APENAS um JSON válido, sem texto antes ou depois, no formato:
+{{
+  "paginas": [
+    {{
+      "pagina_ordem": 1,
+      "numero_lote": "01" ou null,
+      "nome_animal": "", "registro": "", "raca": "", "sexo": "",
+      "nascimento": "", "pelagem": "", "vendedor": "",
+      "pai": "", "mae": "", "avo_paterno": "", "avo_paterna": "",
+      "avo_materno": "", "avo_materna": "", "observacoes": ""
+    }}
+  ]
+}}
+
+O array "paginas" DEVE ter exatamente {len(bloco_paginas)} itens, um por página.
 """
 
     url = "https://api.deepseek.com/chat/completions"
-    for api_key in ds_keys:
+    ultimo_erro = ""
+    for api_key in _ds_keys:
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
         payload = {
             "model": "deepseek-chat",
@@ -281,42 +344,63 @@ Retorne APENAS um JSON válido.
             "temperature": 0.1
         }
         try:
-            res = requests.post(url, headers=headers, json=payload, timeout=30).json()
-            if 'choices' in res:
-                content = res['choices'][0]['message']['content']
-                return json.loads(content)
-        except Exception:
-            continue
-    return None
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            res_json = response.json()
+            if response.status_code == 200 and 'choices' in res_json:
+                dados = extrair_json(res_json['choices'][0]['message']['content'])
+                if not dados or "paginas" not in dados:
+                    ultimo_erro = "DeepSeek respondeu, mas não veio JSON válido"
+                    continue
+                paginas = dados["paginas"]
+                while len(paginas) < len(bloco_paginas):
+                    paginas.append(None)
+                return paginas[:len(bloco_paginas)], None
+            else:
+                ultimo_erro = f"HTTP {response.status_code}: {res_json.get('error', res_json)}"
+        except Exception as e:
+            ultimo_erro = str(e)
+
+    return [None] * len(bloco_paginas), ultimo_erro
 
 @st.cache_data(ttl=7200, show_spinner=False)
-def construir_indice_catalogo(file_bytes_cat, hash_arquivo, ds_keys, max_paginas=60):
+def construir_indice_catalogo(file_bytes_cat, hash_arquivo, _ds_keys, max_paginas, tamanho_lote):
     indice = {}
-    if not file_bytes_cat or not ds_keys:
-        return indice, 0
+    erros = []
+    if not file_bytes_cat or not _ds_keys:
+        return indice, 0, ["sem catálogo ou sem DEEPSEEK_API_KEY"]
 
-    paginas_extraidas = []
-    try:
-        with pdfplumber.open(BytesIO(file_bytes_cat)) as pdf:
-            total = min(len(pdf.pages), max_paginas)
-            for i in range(total):
-                txt = pdf.pages[i].extract_text() or ""
-                paginas_extraidas.append((i, txt))
-    except Exception:
-        return indice, 0
+    paginas_extraidas = extrair_textos_paginas(file_bytes_cat, max_paginas)
+    if not paginas_extraidas:
+        return indice, 0, ["não foi possível extrair texto do catálogo"]
+
+    grupos = [paginas_extraidas[i:i + tamanho_lote] for i in range(0, len(paginas_extraidas), tamanho_lote)]
 
     progresso = st.progress(0, text="🤖 DeepSeek indexando o catálogo...")
-    for idx, (num_pag, txt_pag) in enumerate(paginas_extraidas):
-        if txt_pag.strip():
-            dados = deepseek_indexar_pagina_catalogo(txt_pag, ds_keys)
+    for g_idx, grupo in enumerate(grupos):
+        # pula grupos 100% vazios (economia real — não gasta chamada à toa)
+        if not any((txt or "").strip() for _, txt in grupo):
+            progresso.progress((g_idx + 1) / len(grupos), text=f"🤖 Indexando catálogo... grupo {g_idx + 1}/{len(grupos)}")
+            continue
+
+        resultados, erro = deepseek_indexar_paginas_lote(grupo, _ds_keys)
+        if erro:
+            paginas_reais = [p + 1 for p, _ in grupo]
+            erros.append(f"Páginas {paginas_reais}: {erro}")
+
+        for pos, (num_pag, _txt) in enumerate(grupo):
+            if pos >= len(resultados):
+                continue
+            dados = resultados[pos]
             if dados and dados.get("numero_lote"):
                 chave = normalizar_lote(dados["numero_lote"])
                 if chave:
                     dados["_pagina"] = num_pag
                     indice[chave] = dados
-        progresso.progress((idx + 1) / len(paginas_extraidas), text=f"🤖 DeepSeek indexando... página {idx + 1}/{len(paginas_extraidas)}")
+
+        progresso.progress((g_idx + 1) / len(grupos), text=f"🤖 Indexando catálogo... grupo {g_idx + 1}/{len(grupos)}")
+
     progresso.empty()
-    return indice, len(paginas_extraidas)
+    return indice, len(paginas_extraidas), erros
 
 def encontrar_no_indice(num_lote_oe, nome_animal_oe, indice):
     chave = normalizar_lote(num_lote_oe)
@@ -338,7 +422,7 @@ def encontrar_no_indice(num_lote_oe, nome_animal_oe, indice):
 
     return None
 
-# ==================== DEEPSEEK CRUZA E GERA CONTEÚDO ====================
+# ==================== DEEPSEEK CRUZA E GERA CONTEÚDO (POR LOTE — ORIGINAL, MANTIDA) ====================
 @st.cache_data(ttl=7200, show_spinner=False)
 def deepseek_gerar_conteudo_cached(num_lote, dados_ordem_str, dados_catalogo_str, ds_keys_tuple):
     ds_keys = list(ds_keys_tuple)
@@ -405,6 +489,111 @@ def deepseek_gerar_conteudo(num_lote, dados_ordem, dados_catalogo, ds_keys):
         tuple(ds_keys)
     )
 
+# ==================== NOVO: GERA CONTEÚDO PRA VÁRIOS LOTES DE UMA VEZ (BATCH) ====================
+def deepseek_gerar_conteudo_batch(lotes_bloco, _ds_keys):
+    """lotes_bloco: lista de dicts {"lote":..., "ordem":..., "catalogo":...}.
+    Uma única chamada gera abertura/apresentação/parecer/encartes/gatilhos
+    pra vários lotes ao mesmo tempo — mesmo formato de campos da função
+    individual, só que em lote."""
+    if not lotes_bloco or not _ds_keys:
+        return {}, "sem lotes ou sem chave"
+
+    prompt = f"""
+    Você é um leiloeiro rural de elite. Para CADA lote abaixo, monte a canta
+    completa (mesmo padrão de sempre).
+
+    LOTES (JSON):
+    {json.dumps(lotes_bloco, ensure_ascii=False, indent=2)}
+
+    Para cada lote gere:
+    1. "abertura": Frase de impacto curta (máx. 25 palavras).
+    2. "apresentacao_detalhada": Texto fluído de canta pra pista (animal, vendedor, categoria, virtudes).
+    3. "parecer_ia": Análise comercial/técnica em 1 parágrafo.
+    4. "encartes": 3 encartes pra tela (ex: CATEGORIA, PELAGEM, VENDEDOR).
+    5. "gatilhos": 4 a 5 gatilhos curtos de pista.
+
+    Retorne APENAS JSON:
+    {{
+      "resultados": [
+        {{
+          "lote": "01",
+          "abertura": "...",
+          "apresentacao_detalhada": "...",
+          "parecer_ia": "...",
+          "encartes": [{{"titulo": "CATEGORIA", "valor": "..."}}],
+          "gatilhos": ["...", "...", "...", "..."]
+        }}
+      ]
+    }}
+    """
+
+    url = "https://api.deepseek.com/chat/completions"
+    ultimo_erro = ""
+    for api_key in _ds_keys:
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.4
+        }
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            res_json = response.json()
+            if response.status_code == 200 and 'choices' in res_json:
+                dados = extrair_json(res_json['choices'][0]['message']['content'])
+                if not dados or "resultados" not in dados:
+                    ultimo_erro = "DeepSeek respondeu, mas não veio JSON válido"
+                    continue
+                mapa = {}
+                for r in dados["resultados"]:
+                    lt = r.get("lote")
+                    if lt:
+                        mapa[normalizar_lote(lt)] = r
+                return mapa, None
+            else:
+                ultimo_erro = f"HTTP {response.status_code}: {res_json.get('error', res_json)}"
+        except Exception as e:
+            ultimo_erro = str(e)
+
+    return {}, ultimo_erro
+
+@st.cache_data(ttl=7200, show_spinner=False)
+def preparar_todos_conteudos(lista_lotes, mapa_oe, indice_catalogo, _ds_keys, tamanho_lote):
+    """Pré-gera o conteúdo de TODOS os lotes de uma vez, em lotes (batches),
+    e cacheia o resultado inteiro. Depois disso, navegar entre lotes é só
+    lookup em dicionário — sem nova chamada de IA. Se algum lote não vier
+    no lote (ex: resposta truncada), a função individual já cacheada
+    (deepseek_gerar_conteudo) continua servindo de fallback automático."""
+    resultado_final = {}
+    erros = []
+
+    if not lista_lotes or not _ds_keys:
+        return resultado_final, ["sem lotes ou sem chave"]
+
+    lotes_bloco = []
+    for num_lote in lista_lotes:
+        dados_ordem = mapa_oe.get(num_lote, {})
+        dados_cat = encontrar_no_indice(num_lote, dados_ordem.get("nome_animal", ""), indice_catalogo)
+        lotes_bloco.append({
+            "lote": num_lote,
+            "ordem": dados_ordem,
+            "catalogo": {k: v for k, v in (dados_cat or {}).items() if k != "_pagina"}
+        })
+
+    grupos = [lotes_bloco[i:i + tamanho_lote] for i in range(0, len(lotes_bloco), tamanho_lote)]
+
+    progresso = st.progress(0, text="🧠 Preparando a canta de todos os lotes...")
+    for g_idx, grupo in enumerate(grupos):
+        mapa_resultado, erro = deepseek_gerar_conteudo_batch(grupo, _ds_keys)
+        if erro:
+            erros.append(f"Grupo lotes {[g['lote'] for g in grupo]}: {erro}")
+        resultado_final.update(mapa_resultado)
+        progresso.progress((g_idx + 1) / len(grupos), text=f"🧠 Preparando a canta... grupo {g_idx + 1}/{len(grupos)}")
+    progresso.empty()
+
+    return resultado_final, erros
+
 def renderizar_pedigree(dados_catalogo):
     if not dados_catalogo:
         return
@@ -438,6 +627,19 @@ def run():
             "Máx. páginas catálogo", min_value=1, max_value=300, value=60
         )
 
+        with st.expander("⚙️ Desempenho (avançado)"):
+            tamanho_lote_paginas = st.number_input(
+                "Páginas de catálogo por chamada", min_value=1, max_value=10, value=BATCH_PAGINAS_PADRAO
+            )
+            tamanho_lote_conteudo = st.number_input(
+                "Lotes por chamada (canta/gatilhos)", min_value=1, max_value=20, value=BATCH_LOTES_PADRAO
+            )
+            if st.button("🔄 Reprocessar tudo (limpar cache)", use_container_width=True):
+                construir_indice_catalogo.clear()
+                preparar_todos_conteudos.clear()
+                deepseek_gerar_conteudo_cached.clear()
+                st.rerun()
+
     file_bytes_oe = file_oe.getvalue() if file_oe else None
     file_bytes_cat = file_cat.getvalue() if file_cat else None
 
@@ -449,10 +651,38 @@ def run():
 
     indice_catalogo = {}
     total_paginas_cat = 0
+    erros_indice = []
     if file_bytes_cat and ds_keys:
-        indice_catalogo, total_paginas_cat = construir_indice_catalogo(
-            file_bytes_cat, hash_bytes(file_bytes_cat), ds_keys, max_paginas_catalogo
+        indice_catalogo, total_paginas_cat, erros_indice = construir_indice_catalogo(
+            file_bytes_cat, hash_bytes(file_bytes_cat), tuple(ds_keys),
+            max_paginas_catalogo, tamanho_lote_paginas
         )
+
+    # pré-gera a canta de TODOS os lotes de uma vez (roda 1x, fica em cache)
+    dados_finais_todos = {}
+    erros_conteudo = []
+    if ds_keys:
+        dados_finais_todos, erros_conteudo = preparar_todos_conteudos(
+            tuple(sequencia_oe), mapa_oe, indice_catalogo, tuple(ds_keys), tamanho_lote_conteudo
+        )
+
+    if erros_indice or erros_conteudo:
+        with st.expander("🛠️ Status do processamento (debug)"):
+            st.markdown(
+                f'<div class="status-processamento">'
+                f'Lotes na O.E.: {len(sequencia_oe)} | '
+                f'Páginas do catálogo indexadas: {len(indice_catalogo)} de {total_paginas_cat} | '
+                f'Lotes com canta pronta: {len(dados_finais_todos)}'
+                f'</div>', unsafe_allow_html=True
+            )
+            if erros_indice:
+                st.error("Erros na indexação do catálogo:")
+                for e in erros_indice:
+                    st.text(f"• {e}")
+            if erros_conteudo:
+                st.error("Erros ao gerar a canta/gatilhos:")
+                for e in erros_conteudo:
+                    st.text(f"• {e}")
 
     if modo_ordenacao == "ORDEM NUMÉRICA (LT)":
         lista_lotes = sorted(sequencia_oe, key=lambda x: int(re.sub(r"\D", "", x) or 0))
@@ -496,13 +726,16 @@ def run():
     dados_catalogo = encontrar_no_indice(num_lote, dados_lote.get("nome_animal", ""), indice_catalogo) if indice_catalogo else None
     pagina_detectada = dados_catalogo.get("_pagina", -1) if dados_catalogo else -1
 
-    dados_finais = None
-    if ds_keys:
+    # 1) tenta pegar do lote pré-processado (sem chamada de IA);
+    # 2) se não achou (ex: erro pontual no batch), cai no cálculo individual
+    #    já cacheado — continua funcionando igual antes, só que como reserva.
+    dados_finais = dados_finais_todos.get(normalizar_lote(num_lote))
+    if not dados_finais and ds_keys:
         with st.spinner("🧠 DeepSeek preparando a pista..."):
             dados_finais = deepseek_gerar_conteudo(num_lote, dados_lote, dados_catalogo, ds_keys)
 
     # ==================== RENDERIZAÇÃO DE LAYOUT ====================
-    
+
     # CASO 1: TEM CATÁLOGO CARREGADO
     if file_bytes_cat:
         col_esquerda, col_direita = st.columns([1, 1])
@@ -524,7 +757,7 @@ def run():
 
             if dados_catalogo:
                 with st.expander("📖 Dados do Catálogo (JSON)"):
-                    st.json(dados_catalogo)
+                    st.json({k: v for k, v in dados_catalogo.items() if k != "_pagina"})
 
             # GATILHOS DE PISTA MOVIDOS PARA DEBAIXO DO CATÁLOGO
             st.markdown("### 🎤 GATILHOS DE PISTA")
@@ -535,7 +768,7 @@ def run():
         # COLUNA DIREITA: INFORMAÇÕES E CANTA DO LEILOEIRO
         with col_direita:
             st.markdown(f'<div class="lote-destaque">LOTE {num_lote}<br><span style="font-size: 24px;">{dados_lote.get("posicao", "")}</span></div>', unsafe_allow_html=True)
-            
+
             nome_exibir = (dados_catalogo or {}).get("nome_animal") or dados_lote.get("nome_animal", "")
             if nome_exibir:
                 st.markdown(f'<div class="nome-animal-box">🐴 {nome_exibir}</div>', unsafe_allow_html=True)
@@ -563,7 +796,7 @@ def run():
     # CASO 2: SEM CATÁLOGO (LAYOUT COMPLETO / FULL SCREEN)
     else:
         st.markdown(f'<div class="lote-destaque">LOTE {num_lote} | {dados_lote.get("posicao", "")}</div>', unsafe_allow_html=True)
-        
+
         nome_exibir = dados_lote.get("nome_animal", "")
         if nome_exibir:
             st.markdown(f'<div class="nome-animal-box">🐴 {nome_exibir}</div>', unsafe_allow_html=True)
